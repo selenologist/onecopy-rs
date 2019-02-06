@@ -1,0 +1,8 @@
+[package]
+name = "onecopy"
+version = "0.1.0"
+authors = ["luna <luna@example.com>"]
+edition = "2018"
+
+[dependencies]
+# no deps! (except std::prelude of course) woo
