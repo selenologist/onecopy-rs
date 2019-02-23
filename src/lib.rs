@@ -355,4 +355,63 @@ mod tests {
         // performance but good to do a quick maybe-false-negative check for races
         b.iter(multiple_thread_main);
     }
+
+    #[test]
+    fn rc_share() {
+        // It's very unsafe to share things like Rc<Cell> across threads using OneCopy.
+        // However, it still takes a few tries to make it actually race and corrupt something.
+        // This test should occasionally crash as a result of multiple threads writing the same
+        // memory.
+        //
+        // DO NOT DO THIS.
+
+        // Create a Rc<Cell<String>>, something that is neither Send nor Sync
+        let r = std::rc::Rc::new(std::cell::Cell::new(String::from("hello")));
+
+        // Create a bunch of references to this Cell wrapped in OneCopy to let it go across threads
+        // anyway. An array of OneCopys is created per thread; I just increased the amount until I
+        // started seeing crashes but any amount is unsafe.
+        let per_thread = 32;
+        let o:Vec<Vec<OneCopy<_>>> =
+            (0..N_THREADS)
+            .map(|_| (0..per_thread)
+                     .map(|_| OneCopy::new(r.clone()))
+                     .collect())
+            .collect();
+
+        // keep track of starting time so debug messages can be ordered
+        //let start = std::time::Instant::now();
+
+        // function for a thread to consume its array of references to the Cell
+        let consumer =
+            move |n:usize,o:Vec<OneCopy<std::rc::Rc<std::cell::Cell<String>>>>| {
+                // consume all the OneCopys into bare Rc now so as to prevent any synchronisation
+                // via AtomicPtr whilst the Cell is being replaced.
+                let o = o.into_iter().filter_map(|o|o.get()).collect::<Vec<_>>();
+                for (i,o) in o.into_iter().enumerate() {
+                    // corrupt memory by mutating memory at the same time as other threads.
+                    // What is written isn't important, just write something.
+                    let last = o.replace(format!("{:020} {:020}", n, i));
+                    // thread N made its I-th read; it got <last> at <time>. This will likely
+                    // display garbage characters due to corruption.
+                    // Commenting this out makes crashes more likely as the timing between threads
+                    // will be even tighter.
+                    //eprintln!("{} {} = {} {:?}", n, i, last, start.elapsed());
+                }
+            };
+
+        // Feed arrays into threads so they will race and corrupt things.
+        // Do a collect so that all the arrays will be created before the for_each below.
+        let handles =
+            o.into_iter()
+             .enumerate()
+             .map(|(n, o)| thread::spawn(move || consumer(n, o)))
+             .collect::<Vec<_>>();
+        
+        // wait for threads to finish
+        handles.into_iter().for_each(|h| h.join().unwrap());
+
+        println!("got lucky, didn't crash. last value: {}", r.replace("".into()));
+        // next time might not be so lucky
+    }
 }
