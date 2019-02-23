@@ -83,6 +83,11 @@ impl<T> OneCopyCanReplace<T> {
 #[derive(Debug)]
 struct OneCopyInner<T>(AtomicPtr<T>);
 
+// we only really need to protect the memory location itself so Relaxed should be just fine.
+// No guarantees though, I admit I'm not confident about this. This const allows the ordering to
+// easily be changed however.
+const ATOMIC_ORDERING: Ordering = Ordering::Relaxed;
+
 impl<T> OneCopyInner<T> {
     fn get(&self) -> Option<Box<T>> {
         // take singular ownership of the pointer by swapping a null pointer in its place
@@ -94,7 +99,7 @@ impl<T> OneCopyInner<T> {
     
     // swap ptr for old value, returning old value as Some<Box<T>> if possible
     fn swap_ptr(&self, new_ptr: *mut T) -> Option<Box<T>> {
-        let old_ptr = self.0.swap(new_ptr, Ordering::SeqCst);
+        let old_ptr = self.0.swap(new_ptr, ATOMIC_ORDERING);
         
         if old_ptr.is_null() {
             // value already taken
@@ -116,7 +121,7 @@ impl<T> OneCopyInner<T> {
         let old = self.0.compare_and_swap(
             std::ptr::null_mut(), // old must equal
             v_ptr,
-            Ordering::SeqCst
+            ATOMIC_ORDERING
         );
 
         if old.is_null() {
